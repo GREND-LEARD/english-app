@@ -11,7 +11,7 @@ export function isClient() {
 }
 
 /**
- * Establece una cookie en el navegador
+ * Establece una cookie en el navegador con opciones de seguridad mejoradas
  */
 export function setCookie(name, value, days) {
   if (!isClient()) return;
@@ -19,7 +19,8 @@ export function setCookie(name, value, days) {
   const expiryDate = new Date();
   expiryDate.setDate(expiryDate.getDate() + days);
   
-  const cookie = `${name}=${value}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax`;
+  // Añadir opciones de seguridad adicionales a la cookie
+  const cookie = `${name}=${value}; expires=${expiryDate.toUTCString()}; path=/; SameSite=Lax; Secure`;
   document.cookie = cookie;
 }
 
@@ -41,14 +42,18 @@ export function getCookie(name) {
 
 /**
  * Obtiene el ID de usuario anónimo de las cookies o crea uno nuevo si no existe
+ * Ahora con validación adicional para asegurar que el ID tiene el formato correcto
  */
 export function getOrCreateUserId() {
   if (!isClient()) return null;
   
   let userId = getCookie(USER_ID_COOKIE);
   
-  // Si no existe un ID de usuario, crear uno nuevo
-  if (!userId) {
+  // Validar que el ID tiene formato UUID válido
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  
+  // Si no existe un ID de usuario o no es válido, crear uno nuevo
+  if (!userId || !uuidRegex.test(userId)) {
     userId = uuidv4();
     setCookie(USER_ID_COOKIE, userId, 365); // 1 año
   }

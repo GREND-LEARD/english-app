@@ -28,8 +28,12 @@ export async function createTables() {
     CREATE TABLE IF NOT EXISTS user_progress (
       id SERIAL PRIMARY KEY,
       user_id TEXT NOT NULL,
+      user_name TEXT,
+      user_level TEXT DEFAULT 'beginner',
       total_attempts INTEGER DEFAULT 0,
       correct_attempts INTEGER DEFAULT 0,
+      last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      streak_days INTEGER DEFAULT 0,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     )
@@ -42,17 +46,72 @@ export async function createTables() {
       verb TEXT NOT NULL,
       attempts INTEGER DEFAULT 0,
       correct INTEGER DEFAULT 0,
+      mastery_level INTEGER DEFAULT 0,
       last_practiced TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, verb)
+    )
+  `;
+
+  const createUserAchievementsTable = `
+    CREATE TABLE IF NOT EXISTS user_achievements (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      achievement_id TEXT NOT NULL,
+      unlocked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, achievement_id)
     )
   `;
 
   try {
     await query(createUserProgressTable, []);
     await query(createVerbProgressTable, []);
-    console.log('Tablas creadas correctamente');
+    await query(createUserAchievementsTable, []);
+    
+    // Verificar y actualizar la estructura de tabla user_progress si es necesario
+    const checkUserColumns = await query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'user_progress' AND column_name IN ('user_name', 'user_level', 'streak_days', 'last_active')
+    `, []);
+    
+    const missingColumns = [];
+    const expectedColumns = ['user_name', 'user_level', 'streak_days', 'last_active'];
+    const existingColumns = checkUserColumns.rows.map(row => row.column_name);
+    
+    expectedColumns.forEach(column => {
+      if (!existingColumns.includes(column)) {
+        missingColumns.push(column);
+      }
+    });
+    
+    // Añadir columnas faltantes si es necesario
+    for (const column of missingColumns) {
+      let alterQuery = '';
+      
+      switch(column) {
+        case 'user_name':
+          alterQuery = `ALTER TABLE user_progress ADD COLUMN user_name TEXT`;
+          break;
+        case 'user_level':
+          alterQuery = `ALTER TABLE user_progress ADD COLUMN user_level TEXT DEFAULT 'beginner'`;
+          break;
+        case 'streak_days':
+          alterQuery = `ALTER TABLE user_progress ADD COLUMN streak_days INTEGER DEFAULT 0`;
+          break;
+        case 'last_active':
+          alterQuery = `ALTER TABLE user_progress ADD COLUMN last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP`;
+          break;
+      }
+      
+      if (alterQuery) {
+        await query(alterQuery, []);
+        console.log(`Columna ${column} añadida a user_progress`);
+      }
+    }
+    
+    console.log('Tablas creadas/actualizadas correctamente');
   } catch (error) {
-    console.error('Error al crear tablas:', error);
+    console.error('Error al crear/actualizar tablas:', error);
   }
 }
 
@@ -84,16 +143,33 @@ export async function getUserProgress(userId) {
 // Actualizar progreso del usuario después de un intento
 export async function updateUserProgress(userId, isCorrect) {
   try {
+    const now = new Date();
+    
+    // Actualizar contadores y fecha de actividad
     const result = await query(
       `UPDATE user_progress 
        SET 
          total_attempts = total_attempts + 1, 
          correct_attempts = correct_attempts + $1,
+         last_active = CURRENT_TIMESTAMP,
          updated_at = CURRENT_TIMESTAMP
        WHERE user_id = $2
        RETURNING *`,
       [isCorrect ? 1 : 0, userId]
     );
+    
+    // Si no hay resultado, crear el perfil de usuario
+    if (result.rowCount === 0) {
+      const newUser = await query(
+        `INSERT INTO user_progress 
+         (user_id, total_attempts, correct_attempts) 
+         VALUES ($1, 1, $2) 
+         RETURNING *`,
+        [userId, isCorrect ? 1 : 0]
+      );
+      return newUser.rows[0];
+    }
+    
     return result.rows[0];
   } catch (error) {
     console.error('Error al actualizar progreso del usuario:', error);
@@ -121,14 +197,31 @@ export async function updateVerbProgress(userId, verb, isCorrect) {
       return result.rows[0];
     } else {
       // Actualizar registro existente
+      const verbProgress = checkResult.rows[0];
+      
+      // Calcular nuevo nivel de maestría (0-5)
+      let newMasteryLevel = verbProgress.mastery_level || 0;
+      const successRate = (verbProgress.correct + (isCorrect ? 1 : 0)) / (verbProgress.attempts + 1);
+      
+      // Actualizar nivel de maestría basado en tasa de éxito y número de intentos
+      if (verbProgress.attempts >= 5) {
+        if (successRate >= 0.9) newMasteryLevel = 5;
+        else if (successRate >= 0.8) newMasteryLevel = 4;
+        else if (successRate >= 0.7) newMasteryLevel = 3;
+        else if (successRate >= 0.6) newMasteryLevel = 2;
+        else if (successRate >= 0.5) newMasteryLevel = 1;
+        else newMasteryLevel = 0;
+      }
+      
       const result = await query(
         `UPDATE verb_progress
          SET attempts = attempts + 1,
              correct = correct + $1,
+             mastery_level = $2,
              last_practiced = CURRENT_TIMESTAMP
-         WHERE user_id = $2 AND verb = $3
+         WHERE user_id = $3 AND verb = $4
          RETURNING *`,
-        [isCorrect ? 1 : 0, userId, verb]
+        [isCorrect ? 1 : 0, newMasteryLevel, userId, verb]
       );
       return result.rows[0];
     }
@@ -142,7 +235,7 @@ export async function updateVerbProgress(userId, verb, isCorrect) {
 export async function getVerbStats(userId) {
   try {
     const result = await query(
-      `SELECT verb, attempts, correct, 
+      `SELECT verb, attempts, correct, mastery_level,
        ROUND((correct::NUMERIC / NULLIF(attempts, 0)) * 100, 2) as success_rate,
        last_practiced
        FROM verb_progress
@@ -161,7 +254,7 @@ export async function getVerbStats(userId) {
 export async function getDifficultVerbs(userId, limit = 10) {
   try {
     const result = await query(
-      `SELECT verb, attempts, correct, 
+      `SELECT verb, attempts, correct, mastery_level,
        ROUND((correct::NUMERIC / NULLIF(attempts, 0)) * 100, 2) as success_rate
        FROM verb_progress
        WHERE user_id = $1 AND attempts > 2
@@ -172,6 +265,37 @@ export async function getDifficultVerbs(userId, limit = 10) {
     return result.rows;
   } catch (error) {
     console.error('Error al obtener verbos difíciles:', error);
+    throw error;
+  }
+}
+
+// Actualizar información de usuario (nombre, nivel)
+export async function updateUserInfo(userId, name, level) {
+  try {
+    const result = await query(
+      `UPDATE user_progress
+       SET user_name = $1,
+           user_level = $2,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $3
+       RETURNING *`,
+      [name, level, userId]
+    );
+    
+    if (result.rowCount === 0) {
+      const newUser = await query(
+        `INSERT INTO user_progress
+         (user_id, user_name, user_level)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [userId, name, level]
+      );
+      return newUser.rows[0];
+    }
+    
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error al actualizar información de usuario:', error);
     throw error;
   }
 } 
