@@ -102,14 +102,20 @@ const AnimatedBackground = () => {
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 overflow-hidden pointer-events-none z-0"
+      className="fixed inset-0 overflow-hidden z-[9999]"
       style={{
-        background: 'radial-gradient(circle at 60% 40%, #0f172a 0%, #18181b 100%)',
-        border: '4px solid red',
-        backgroundColor: 'rgba(255,0,0,0.2)',
-        transition: 'background 1s'
+        background: 'rgba(0,255,0,0.5)', // verde para depuración
+        border: '8px solid orange', // borde naranja para depuración
+        color: 'black',
+        fontSize: '48px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'auto',
       }}
-    />
+    >
+      FONDO ANIMADO TEST
+    </div>
   );
 };
 
