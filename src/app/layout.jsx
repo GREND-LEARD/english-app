@@ -1,7 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import Navbar from "@/components/Navbar";
 import { ThemeProvider } from 'next-themes';
-import ThemeToggle from '@/components/ThemeToggle';
 import ConfettiButton from '@/components/ConfettiButton';
 import "./globals.css";
 import { getServerSession } from "next-auth/next";
@@ -44,7 +43,6 @@ export default async function RootLayout({ children }) {
             
             <Navbar />
             
-            <ThemeToggle />
             <ConfettiButton />
 
             <main className="relative z-10 pt-20 pb-10">
