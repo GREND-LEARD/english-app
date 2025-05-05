@@ -1,15 +1,62 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useUserProgress, useVerbStats, useDifficultVerbs, calculateSuccessRate } from '@/lib/progress';
 import verbsData from '@/lib/verbs.json';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 
 export default function ProgressPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const { progress, loading: progressLoading, error: progressError } = useUserProgress();
   const { stats, loading: statsLoading, error: statsError } = useVerbStats();
   const { verbs: difficultVerbs, loading: difficultLoading } = useDifficultVerbs(5);
   const [activeTab, setActiveTab] = useState('general');
+
+  // Redirigir si no hay sesión y se terminó de cargar
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/auth?message=login_required&redirectTo=/progress');
+    }
+  }, [status, router]);
+
+  // Si está cargando la sesión, mostrar indicador de carga
+  if (status === 'loading') {
+    return (
+      <div className="container mx-auto p-4 sm:p-8">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
+          <div className="animate-pulse">
+            <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mx-auto mb-4"></div>
+            <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded mb-4"></div>
+            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4 mx-auto"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Si no hay sesión, no deberíamos llegar aquí debido a la redirección
+  // pero por si acaso mostramos un mensaje de error
+  if (status === 'unauthenticated') {
+    return (
+      <div className="container mx-auto p-4 sm:p-8">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-8 text-center">
+          <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">Necesitas iniciar sesión</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">
+            Para ver tu progreso y estadísticas necesitas tener una cuenta e iniciar sesión.
+          </p>
+          <Link 
+            href="/auth" 
+            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
+          >
+            Iniciar sesión o registrarse
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   // Función para encontrar información del verbo
   const findVerbInfo = (infinitive) => {

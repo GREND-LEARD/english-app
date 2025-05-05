@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getUserId } from './auth';
+import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 
 // Hook para obtener el progreso general del usuario
 export function useUserProgress() {
@@ -108,8 +110,14 @@ export async function updateProgress(verb, isCorrect) {
       }),
     });
 
+    if (response.status === 401) {
+      // Si no está autenticado, devolvemos un objeto especial indicando esto
+      return { requiresAuth: true, success: false };
+    }
+
     if (!response.ok) {
-      throw new Error('Error al actualizar progreso');
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Error al actualizar progreso');
     }
 
     return await response.json();
@@ -117,6 +125,41 @@ export async function updateProgress(verb, isCorrect) {
     console.error('Error updating progress:', error);
     throw error;
   }
+}
+
+// Hook para usar el progreso actualizado con manejo de autenticación
+export function useProgressUpdate() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [error, setError] = useState(null);
+
+  const update = useCallback(async (verb, isCorrect) => {
+    if (status === 'loading') return { success: false, waiting: true };
+    
+    setIsUpdating(true);
+    setError(null);
+    
+    try {
+      const result = await updateProgress(verb, isCorrect);
+      
+      // Si el resultado indica que se requiere autenticación
+      if (result.requiresAuth) {
+        // Redirigir a la página de inicio de sesión
+        router.push(`/auth?message=login_required&redirectTo=${encodeURIComponent(window.location.pathname)}`);
+        return { success: false, requiresAuth: true };
+      }
+      
+      return result;
+    } catch (err) {
+      setError(err.message);
+      return { success: false, error: err.message };
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [router, status]);
+
+  return { update, isUpdating, error };
 }
 
 // Función para calcular tasas de éxito

@@ -185,3 +185,21 @@ main {
   position: relative;
   z-index: 10;
 }
+
+/* Estilos para la tarjeta de autenticación con efecto 3D */
+.perspective {
+  perspective: 1000px;
+}
+
+/* Estilos para la tarjeta de autenticación con efecto 3D */
+.perspective {
+  perspective: 1000px;
+}
+
+[class*="[transform-style:preserve-3d]"] {
+  transform-style: preserve-3d;
+}
+
+[class*="[backface-visibility:hidden]"] {
+  backface-visibility: hidden;
+}

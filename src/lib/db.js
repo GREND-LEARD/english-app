@@ -1,4 +1,6 @@
 import { Pool } from 'pg';
+import bcrypt from 'bcrypt';
+import crypto from 'crypto'; // Importar crypto para generar UUIDs
 
 // Configuración de la conexión a Neon DB
 const pool = new Pool({
@@ -27,11 +29,13 @@ export async function createTables() {
   const createUserProgressTable = `
     CREATE TABLE IF NOT EXISTS user_progress (
       id SERIAL PRIMARY KEY,
-      user_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       user_name TEXT,
       user_level TEXT DEFAULT 'beginner',
       total_attempts INTEGER DEFAULT 0,
       correct_attempts INTEGER DEFAULT 0,
+      total_verbs_practiced INTEGER DEFAULT 0,
+      mastered_verbs INTEGER DEFAULT 0,
       last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       streak_days INTEGER DEFAULT 0,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -42,7 +46,7 @@ export async function createTables() {
   const createVerbProgressTable = `
     CREATE TABLE IF NOT EXISTS verb_progress (
       id SERIAL PRIMARY KEY,
-      user_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       verb TEXT NOT NULL,
       attempts INTEGER DEFAULT 0,
       correct INTEGER DEFAULT 0,
@@ -55,63 +59,107 @@ export async function createTables() {
   const createUserAchievementsTable = `
     CREATE TABLE IF NOT EXISTS user_achievements (
       id SERIAL PRIMARY KEY,
-      user_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       achievement_id TEXT NOT NULL,
       unlocked_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, achievement_id)
     )
   `;
 
+  // Esquema de tablas que NextAuth necesita
+  const createUsersTable = `
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      email TEXT UNIQUE,
+      "emailVerified" TIMESTAMPTZ,
+      image TEXT,
+      password TEXT -- Añadido para Credentials Provider
+    );
+  `;
+  const createAccountsTable = `
+    CREATE TABLE IF NOT EXISTS accounts (
+      id SERIAL PRIMARY KEY,
+      "userId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      "providerAccountId" TEXT NOT NULL,
+      refresh_token TEXT,
+      access_token TEXT,
+      expires_at BIGINT,
+      token_type TEXT,
+      scope TEXT,
+      id_token TEXT,
+      session_state TEXT,
+      UNIQUE (provider, "providerAccountId")
+    );
+  `;
+  const createSessionsTable = `
+    CREATE TABLE IF NOT EXISTS sessions (
+      id SERIAL PRIMARY KEY,
+      "sessionToken" TEXT NOT NULL UNIQUE,
+      "userId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires TIMESTAMPTZ NOT NULL
+    );
+  `;
+  const createVerificationTokenTable = `
+    CREATE TABLE IF NOT EXISTS verification_tokens (
+      identifier TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (identifier, token)
+    );
+  `;
+
   try {
+    // Crear tablas de NextAuth primero (por las referencias)
+    await query(createUsersTable, []);
+    await query(createAccountsTable, []);
+    await query(createSessionsTable, []);
+    await query(createVerificationTokenTable, []);
+
+    // Asegurar que la columna password existe en users (ya se hace en createUsersTable)
+    // No es necesario el ALTER TABLE si la tabla se crea con la columna
+
+    // Crear tablas de la aplicación
     await query(createUserProgressTable, []);
     await query(createVerbProgressTable, []);
     await query(createUserAchievementsTable, []);
     
-    // Verificar y actualizar la estructura de tabla user_progress si es necesario
-    const checkUserColumns = await query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'user_progress' AND column_name IN ('user_name', 'user_level', 'streak_days', 'last_active')
-    `, []);
-    
-    const missingColumns = [];
-    const expectedColumns = ['user_name', 'user_level', 'streak_days', 'last_active'];
-    const existingColumns = checkUserColumns.rows.map(row => row.column_name);
-    
-    expectedColumns.forEach(column => {
-      if (!existingColumns.includes(column)) {
-        missingColumns.push(column);
-      }
-    });
-    
-    // Añadir columnas faltantes si es necesario
-    for (const column of missingColumns) {
-      let alterQuery = '';
-      
-      switch(column) {
-        case 'user_name':
-          alterQuery = `ALTER TABLE user_progress ADD COLUMN user_name TEXT`;
-          break;
-        case 'user_level':
-          alterQuery = `ALTER TABLE user_progress ADD COLUMN user_level TEXT DEFAULT 'beginner'`;
-          break;
-        case 'streak_days':
-          alterQuery = `ALTER TABLE user_progress ADD COLUMN streak_days INTEGER DEFAULT 0`;
-          break;
-        case 'last_active':
-          alterQuery = `ALTER TABLE user_progress ADD COLUMN last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP`;
-          break;
-      }
-      
-      if (alterQuery) {
-        await query(alterQuery, []);
-        console.log(`Columna ${column} añadida a user_progress`);
-      }
+    // Código de verificación y actualización de user_progress (simplificado)
+    const userProgressCols = ['user_name', 'user_level', 'streak_days', 'last_active', 'total_verbs_practiced', 'mastered_verbs'];
+    for (const column of userProgressCols) {
+        try {
+            let colType = 'TEXT';
+            let colDefault = 'DEFAULT NULL';
+            if (['streak_days', 'total_verbs_practiced', 'mastered_verbs'].includes(column)) {
+                colType = 'INTEGER';
+                colDefault = 'DEFAULT 0';
+            } else if (column === 'last_active') {
+                colType = 'TIMESTAMP WITH TIME ZONE';
+                colDefault = 'DEFAULT CURRENT_TIMESTAMP';
+            } else if (column === 'user_level') {
+                 colDefault = 'DEFAULT \'beginner\'';
+            }
+            await query(`ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS ${column} ${colType} ${colDefault}`, []);
+            console.log(`Columna ${column} asegurada en user_progress`);
+        } catch (e) {
+            console.error(`Error al asegurar columna ${column} en user_progress:`, e);
+        }
     }
     
-    console.log('Tablas creadas/actualizadas correctamente');
+    // Asegurar columna mastery_level en verb_progress
+    try {
+        await query(`ALTER TABLE verb_progress ADD COLUMN IF NOT EXISTS mastery_level INTEGER DEFAULT 0`, []);
+        console.log('Columna mastery_level asegurada en verb_progress');
+    } catch(e) {
+        console.error('Error al asegurar columna mastery_level en verb_progress:', e);
+    }
+
+    console.log('Tablas creadas/aseguradas correctamente');
   } catch (error) {
-    console.error('Error al crear/actualizar tablas:', error);
+    console.error('Error al crear/asegurar tablas:', error);
+    // Si ocurre un error aquí, podría ser un problema de permisos o conexión
   }
 }
 
@@ -297,5 +345,57 @@ export async function updateUserInfo(userId, name, level) {
   } catch (error) {
     console.error('Error al actualizar información de usuario:', error);
     throw error;
+  }
+}
+
+// --- Nuevas funciones para Autenticación ---
+
+/**
+ * Busca un usuario por su email en la tabla 'users'.
+ * Devuelve el usuario completo, incluyendo la contraseña hasheada.
+ */
+export async function getUserByEmail(email) {
+  try {
+    const result = await query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+    return result.rows[0] || null; // Devolver null si no se encuentra
+  } catch (error) {
+    console.error('Error al obtener usuario por email:', error);
+    throw error;
+  }
+}
+
+/**
+ * Crea un nuevo usuario en la tabla 'users'.
+ * La contraseña ya debe venir hasheada.
+ */
+export async function createUser(name, email, hashedPassword) {
+  try {
+    // Verificar si el email ya existe
+    const existingUser = await getUserByEmail(email);
+    if (existingUser) {
+      // Lanzar un error específico que pueda ser capturado en la API
+      const error = new Error('El email ya está registrado.');
+      error.code = 'EMAIL_EXISTS'; // Código personalizado
+      throw error;
+    }
+
+    // Generar un ID único para el nuevo usuario
+    const userId = crypto.randomUUID(); 
+
+    // Insertar el nuevo usuario con el ID generado
+    const result = await query(
+      'INSERT INTO users (id, name, email, password) VALUES ($1, $2, $3, $4) RETURNING id, name, email',
+      [userId, name, email, hashedPassword]
+    );
+
+    // Devolver el nuevo usuario creado (sin la contraseña)
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error al crear usuario:', error);
+    // Relanzar el error para que sea manejado por la capa superior (API route)
+    throw error; 
   }
 } 

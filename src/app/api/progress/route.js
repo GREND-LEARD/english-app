@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../auth/[...nextauth]/route';
 import { 
   createTables,
   getUserProgress, 
@@ -11,25 +13,19 @@ import {
 // Inicializar la base de datos (crear tablas)
 createTables().catch(console.error);
 
-// Función para obtener el ID de usuario de las cookies
-function getUserIdFromCookies(request) {
-  const cookies = request.headers.get('cookie') || '';
-  const cookieEntries = cookies.split(';').map(c => c.trim().split('='));
-  const userIdCookie = cookieEntries.find(entry => entry[0] === 'verb_master_user_id');
-  return userIdCookie ? userIdCookie[1] : null;
-}
-
 // Obtener progreso del usuario
 export async function GET(request) {
   try {
-    const userId = getUserIdFromCookies(request);
+    const session = await getServerSession(authOptions);
     
-    if (!userId) {
+    if (!session || !session.user) {
       return NextResponse.json(
-        { error: 'No se pudo identificar al usuario. Por favor, asegúrate de tener cookies habilitadas.' },
+        { error: 'No autenticado. Por favor, inicia sesión para acceder a tu progreso.' },
         { status: 401 }
       );
     }
+    
+    const userId = session.user.id;
     
     // Obtener parámetros de la URL
     const { searchParams } = new URL(request.url);
@@ -62,14 +58,16 @@ export async function GET(request) {
 // Actualizar progreso del usuario
 export async function POST(request) {
   try {
-    const userId = getUserIdFromCookies(request);
+    const session = await getServerSession(authOptions);
     
-    if (!userId) {
+    if (!session || !session.user) {
       return NextResponse.json(
-        { error: 'No se pudo identificar al usuario. Por favor, asegúrate de tener cookies habilitadas.' },
+        { error: 'No autenticado. Por favor, inicia sesión para guardar tu progreso.' },
         { status: 401 }
       );
     }
+    
+    const userId = session.user.id;
     
     const body = await request.json();
     const { verb, isCorrect } = body;
