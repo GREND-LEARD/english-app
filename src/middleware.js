@@ -14,14 +14,23 @@ export async function middleware(request) {
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
   
   if (isProtectedRoute) {
-    // Intentar obtener el token de autenticación
+    // Intentar obtener el token de autenticación con opciones adicionales
     const token = await getToken({ 
       req: request,
-      secret: process.env.NEXTAUTH_SECRET || FALLBACK_SECRET
+      secret: process.env.NEXTAUTH_SECRET || FALLBACK_SECRET,
+      cookieName: process.env.NODE_ENV === "production" ? "__Secure-next-auth.session-token" : "next-auth.session-token",
+      secureCookie: process.env.NODE_ENV === "production"
     });
     
     // Si no hay token, redirigir a la página de login
     if (!token) {
+      // Prevenir redirects infinitos comprobando si ya venimos de la página de auth
+      const referer = request.headers.get("referer") || "";
+      if (referer.includes("/auth")) {
+        // Si venimos de auth, permitir pasar para evitar bucles
+        return NextResponse.next();
+      }
+      
       const url = new URL('/auth', request.url);
       // Añadir parametros para mostrar mensaje y guardar la URL de redirección
       url.searchParams.set('message', 'login_required');

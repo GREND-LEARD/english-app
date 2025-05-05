@@ -31,8 +31,30 @@ const speak = (text) => {
     const textToSpeak = text.includes(' / ') ? text.split(' / ')[0] : text;
     const utterance = new SpeechSynthesisUtterance(textToSpeak);
     utterance.lang = 'en-US';
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    
+    // Función para asignar una voz inglesa y hablar
+    const speakWithEnglishVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      const englishVoices = voices.filter(voice => 
+        voice.lang.includes('en-') || voice.lang.includes('en_')
+      );
+      
+      // Si hay voces en inglés disponibles, usar la primera
+      if (englishVoices.length > 0) {
+        utterance.voice = englishVoices[0];
+      }
+      
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    };
+    
+    // En algunos navegadores las voces se cargan de forma asíncrona
+    if (window.speechSynthesis.getVoices().length) {
+      speakWithEnglishVoice();
+    } else {
+      // Esperar a que las voces se carguen
+      window.speechSynthesis.onvoiceschanged = speakWithEnglishVoice;
+    }
   } else {
     alert("Lo siento, tu navegador no soporta text-to-speech.");
   }
