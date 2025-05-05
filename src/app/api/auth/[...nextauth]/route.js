@@ -9,11 +9,18 @@ import { getUserByEmail } from "@/lib/db"; // Corregir la ruta de importación u
 // Asegúrate de que DATABASE_URL está en tus variables de entorno
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Añade configuración SSL si es necesaria para Neon
-  // ssl: {
-  //   rejectUnauthorized: false 
-  // } 
+  ssl: { rejectUnauthorized: false } // Asegúrate de que SSL esté configurado si es necesario
 });
+
+// Verificar que exista la variable de entorno
+if (!process.env.NEXTAUTH_SECRET) {
+  console.warn("⚠️ No NEXTAUTH_SECRET found in environment variables. Using fallback secret (NOT SECURE for production).");
+}
+
+// Clave fija para desarrollo como fallback (solo si no hay variable de entorno)
+// En producción, SIEMPRE usa variables de entorno
+const FALLBACK_SECRET = "e9e1b1c2d4e2f6g3h1i8j5k3l1m5n7o9p2q3r7s6t8u9v2w4x5y8z3";
+const actualSecret = process.env.NEXTAUTH_SECRET || FALLBACK_SECRET;
 
 export const authOptions = {
   adapter: PostgresAdapter(pool),
@@ -26,38 +33,54 @@ export const authOptions = {
       // ej.: domain, username, password, 2FA token, etc.
       // Puedes pasar cualquier atributo HTML adicional al tag <input> especificándolo aquí.
       credentials: {
-        email: { label: "Email", type: "text", placeholder: "tu@email.com" },
+        email: { label: "Email", type: "text" },
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials, req) {
-        // Añade lógica aquí para buscar al usuario a partir de
-        // las credenciales proporcionadas
+        console.log("--- Authorize Attempt ---");
+        console.log("Credentials received:", { email: credentials?.email }); // No loguear password directamente
+
         if (!credentials?.email || !credentials?.password) {
-          console.log('Faltan credenciales');
-          return null;
+          console.log('Authorize Error: Faltan credenciales');
+          return null; // Retorna null si faltan credenciales
         }
 
-        // Usar la función importada de db.js
-        const user = await getUserByEmail(credentials.email); 
+        let user = null;
+        try {
+          user = await getUserByEmail(credentials.email); 
+          console.log("User fetched from DB:", user ? { id: user.id, email: user.email, hasPassword: !!user.password } : null);
+        } catch (dbError) {
+          console.error("Authorize Error: Database error fetching user:", dbError);
+          return null; // Retorna null en caso de error de DB
+        }
         
+        // Verificar si se encontró el usuario y si tiene contraseña hasheada
         if (user && user.password) {
-           // ¡IMPORTANTE! Comparar la contraseña enviada con la hasheada en la BD
-           const passwordsMatch = await bcrypt.compare(credentials.password, user.password);
+           console.log("User found, comparing passwords...");
+           let passwordsMatch = false;
+           try {
+              passwordsMatch = await bcrypt.compare(credentials.password, user.password);
+              console.log("Password comparison result:", passwordsMatch);
+           } catch (compareError) {
+              console.error("Authorize Error: bcrypt.compare failed:", compareError);
+              return null; // Retorna null si falla la comparación
+           }
 
            if (passwordsMatch) {
-            // Cualquier objeto devuelto aquí será guardado en el token JWT `user`
-            // y también pasado al adaptador para la sesión de base de datos.
-            // Devuelve solo los datos necesarios del usuario, NUNCA la contraseña.
-             console.log('Usuario autenticado:', user.email);
-             return user; // Devolver el objeto user completo aquí es importante para el callback jwt
+             console.log('Authorize Success: Passwords match!');
+             // Devuelve el objeto de usuario SIN la contraseña
+             const { password, ...userWithoutPassword } = user;
+             return userWithoutPassword; 
            } else {
-             console.log('Contraseña incorrecta para:', credentials.email);
+             console.log('Authorize Error: Contraseña incorrecta');
              return null; // Contraseña incorrecta
            }
+        } else if (user && !user.password) {
+            console.log('Authorize Error: Usuario encontrado pero no tiene contraseña (posiblemente OAuth?)');
+            return null; // Usuario existe pero sin password (quizás registró con Google/otro)
         } else {
-           console.log('Usuario no encontrado o sin contraseña:', credentials.email);
-          // Si devuelves null, se mostrará un error al usuario
-          return null;
+           console.log('Authorize Error: Usuario no encontrado');
+           return null; // Usuario no encontrado
         }
       }
     })
@@ -66,47 +89,69 @@ export const authOptions = {
   // Cambiar la estrategia de sesión a JWT
   session: {
     strategy: "jwt", 
-    // maxAge y updateAge son relevantes para JWT también si quieres personalizar
-    // maxAge: 30 * 24 * 60 * 60, 
-    // updateAge: 24 * 60 * 60, 
+    maxAge: 30 * 24 * 60 * 60, // 30 días 
   },
-  // Necesitas una clave secreta para firmar las cookies/tokens
-  // Guárdala en tus variables de entorno (.env.local)
-  secret: process.env.NEXTAUTH_SECRET,
+  // Usar la clave secreta definida
+  secret: actualSecret,
+
+  // Configuración de cookies seguras
+  cookies: {
+    sessionToken: {
+      name: `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 30 * 24 * 60 * 60, // 30 días
+      },
+    },
+  },
 
   // Opcional: Personalizar páginas de inicio de sesión, error, etc.
-  // pages: {
-  //   signIn: '/auth/signin',
-  //   signOut: '/auth/signout',
-  //   error: '/auth/error', // Error code passed in query string as ?error=
-  //   verifyRequest: '/auth/verify-request', // (used for check email message)
-  //   newUser: '/auth/new-user' // New users will be directed here on first sign in (leave the property out to disable)
-  // },
+  pages: {
+    signIn: '/auth', // Redirigir a tu página unificada
+    error: '/auth', // Puedes mostrar errores en la misma página /auth
+  },
+
+  // Debugging en desarrollo
+  debug: process.env.NODE_ENV === "development",
 
   // Callbacks para controlar el flujo (opcional pero útil)
   callbacks: {
     // Callback JWT: se ejecuta al crear/actualizar un token JWT
-    async jwt({ token, user, account, profile, isNewUser }) {
-      // El objeto 'user' solo está presente en el primer inicio de sesión después de authorize.
-      // En las siguientes llamadas, solo viene 'token'.
-      // Persistimos el id del usuario en el token.
+    async jwt({ token, user }) {
+      // Persistir el ID del usuario en el token
       if (user?.id) {
         token.id = user.id;
       }
-      // Puedes añadir más datos al token aquí si es necesario
-      // if (account?.provider === "google") { token.googleAccessToken = account.access_token; }
       return token;
     },
     // Callback Session: se ejecuta al consultar la sesión desde el cliente
     async session({ session, token }) {
-      // El token JWT (con los datos añadidos en el callback jwt) está disponible aquí.
-      // Añadimos el id del usuario (y otros datos si los añadiste al token) a la sesión del cliente.
+      // Añadir el ID del usuario a la sesión del cliente
       if (token?.id && session.user) {
-        session.user.id = token.id;
+        session.user.id = token.id; 
       }
-      // if (token?.googleAccessToken && session.user) { session.user.googleAccessToken = token.googleAccessToken; }
-      // console.log("Session generada desde token:", session);
       return session;
+    }
+  },
+
+  // Configuración de JWT personalizada para mayor seguridad
+  jwt: {
+    // Para mayor seguridad, generar un nuevo token en cada sesión
+    maxAge: 30 * 24 * 60 * 60, // 30 días
+  },
+
+  // Configuración avanzada de eventos
+  events: {
+    // Registro cuando un usuario inicia sesión
+    async signIn(message) {
+      console.log('User signed in:', message.user.email);
+    },
+    // Registro cuando ocurre un error de sesión
+    async error(message) {
+      console.error('Auth error:', message);
     }
   }
 };

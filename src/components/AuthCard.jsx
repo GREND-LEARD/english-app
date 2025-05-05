@@ -19,36 +19,52 @@ export default function AuthCard({ initialTab = 'login', redirectTo = '/' }) {
   return (
     <div className="w-full max-w-md mx-auto perspective">
       <motion.div
-        className="relative w-full h-[650px] [transform-style:preserve-3d] transition-transform duration-700 ease-in-out"
-        initial={false} // No animar en la carga inicial
+        className="relative w-full min-h-[550px] [transform-style:preserve-3d] transition-transform duration-700 ease-in-out"
+        initial={false}
         animate={{ rotateY: isFlipped ? 180 : 0 }}
         transition={{ duration: 0.7, ease: "easeInOut" }}
       >
         {/* Lado Frontal (Login) */}
         <motion.div
-          className="absolute w-full h-full [backface-visibility:hidden] flex flex-col justify-center p-4 md:p-8"
+          className="absolute w-full h-full [backface-visibility:hidden] flex flex-col justify-center"
         >
-          <LoginForm redirectTo={redirectTo} />
-          <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-            ¿No tienes cuenta?{' '}
-            <button onClick={flipCard} className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 underline ml-1">
-              Regístrate
-            </button>
-          </p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 md:p-8 border border-gray-200 dark:border-gray-700">
+            <LoginForm redirectTo={redirectTo} />
+            
+            <div className="mt-6 text-center">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                ¿No tienes cuenta?{' '}
+                <button 
+                  onClick={flipCard} 
+                  className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 underline focus:outline-none transition-colors"
+                >
+                  Regístrate
+                </button>
+              </p>
+            </div>
+          </div>
         </motion.div>
 
         {/* Lado Trasero (Registro) */}
         <motion.div
-          className="absolute w-full h-full [backface-visibility:hidden] flex flex-col justify-center p-4 md:p-8"
-          style={{ rotateY: 180 }} // Mantener este lado rotado inicialmente
+          className="absolute w-full h-full [backface-visibility:hidden] flex flex-col justify-center"
+          style={{ rotateY: 180 }}
         >
-          <RegisterForm redirectTo={redirectTo} />
-           <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-             ¿Ya tienes cuenta?{' '}
-             <button onClick={flipCard} className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 underline ml-1">
-               Inicia sesión
-             </button>
-           </p>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 md:p-8 border border-gray-200 dark:border-gray-700">
+            <RegisterForm redirectTo={redirectTo} />
+            
+            <div className="mt-6 text-center">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                ¿Ya tienes cuenta?{' '}
+                <button 
+                  onClick={flipCard} 
+                  className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 underline focus:outline-none transition-colors"
+                >
+                  Inicia sesión
+                </button>
+              </p>
+            </div>
+          </div>
         </motion.div>
       </motion.div>
     </div>

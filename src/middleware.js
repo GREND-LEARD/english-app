@@ -4,6 +4,9 @@ import { getToken } from 'next-auth/jwt';
 // Rutas que requieren autenticación
 const protectedRoutes = ['/progress'];
 
+// La misma clave de fallback que en [...nextauth]/route.js
+const FALLBACK_SECRET = "e9e1b1c2d4e2f6g3h1i8j5k3l1m5n7o9p2q3r7s6t8u9v2w4x5y8z3";
+
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
   
@@ -14,7 +17,7 @@ export async function middleware(request) {
     // Intentar obtener el token de autenticación
     const token = await getToken({ 
       req: request,
-      secret: process.env.NEXTAUTH_SECRET
+      secret: process.env.NEXTAUTH_SECRET || FALLBACK_SECRET
     });
     
     // Si no hay token, redirigir a la página de login
